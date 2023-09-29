@@ -28,9 +28,7 @@ namespace ActorRepositoryLib.Tests
                 string connectionString = "Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=ActorRepositoryLib;Integrated Security=True;Connect Timeout=30;Encrypt=False;Trust Server Certificate=False;Application Intent=ReadWrite;Multi Subnet Failover=False";
                 
                 optionsBuilder.UseSqlServer(connectionString);
-                _dbContext = new ActorsDbContext(optionsBuilder.Options);
-                
-                
+                _dbContext = new ActorsDbContext(optionsBuilder.Options);               
             }
 
             InitRepository();
@@ -96,14 +94,17 @@ namespace ActorRepositoryLib.Tests
             //Assert
             Assert.AreEqual(numOfActors - 1, _repo.Get().Count());
             Actor? actorFound = null;
-            foreach (Actor actor in _repo.Get()) 
-            { 
-                if (actor.Id == someActor.Id) 
-                { 
-                    actorFound = actor; 
-                    break; 
-                }
-            }
+            //This:
+            actorFound = _repo.Get().FirstOrDefault(a => a.Id == deletedActor.Id);
+            //Replaces:
+            //foreach (Actor actor in _repo.Get()) 
+            //{ 
+            //    if (actor.Id == someActor.Id) 
+            //    { 
+            //        actorFound = actor; 
+            //        break; 
+            //    }
+            //}
             Assert.IsNull(actorFound);
         }
 
@@ -120,7 +121,7 @@ namespace ActorRepositoryLib.Tests
         [DataRow(1984)]
         public void GetBirthYearBeforeTest(int birthYearBefore)
         {
-            //Act
+            //Arrange & Act
             IEnumerable<Actor> actors = _repo.Get(birthYearBefore);
 
             //Assert: No need to test any further
@@ -133,8 +134,7 @@ namespace ActorRepositoryLib.Tests
                 }
             }
 
-            //Add
-            //birthYearBefore
+            
         }
 
         [TestMethod()]
@@ -144,7 +144,7 @@ namespace ActorRepositoryLib.Tests
         public void GetBirthYearBeforeAndAfterTest(int birthYearBefore, int birthYearAfter)
         {
             //Act
-            IEnumerable<Actor> actors = _repo.Get(birthYearBefore, birthYearBefore);
+            IEnumerable<Actor> actors = _repo.Get(birthYearBefore, birthYearAfter);
 
             //Assert
             Assert.IsNotNull(actors);
@@ -163,6 +163,59 @@ namespace ActorRepositoryLib.Tests
             }
         }
 
+        [TestMethod()]
+        [DataRow(2024, 1820, "id")]
+        [DataRow(1968, 1962, "Id")]
+        [DataRow(1984, 1956, "ID")]
+        [DataRow(2024, 1820, "naME")]
+        [DataRow(1968, 1962, "NAME")]
+        [DataRow(1984, 1956, "name")]
+        [DataRow(2024, 1820, "birthyear")]
+        [DataRow(1968, 1962, "birThyeaR")]
+        [DataRow(1984, 1956, "BIRTHYEAR")]
+        public void GetBirthYearBeforeAndAfterOrderByTest(int birthYearBefore, 
+                                                          int birthYearAfter, 
+                                                          string orderBy)
+        {
+            //Act
+            IEnumerable<Actor>? actors = _repo.Get(birthYearBefore, birthYearAfter, orderBy);
+
+            //Assert
+            Assert.IsNotNull(actors);
+
+            foreach (Actor a in actors)
+            {
+                if (a.BirthYear >= birthYearBefore)
+                {
+                    Assert.Fail($"Birth year {a.BirthYear} is NOT before {birthYearBefore}");
+                }
+
+                if (a.BirthYear <= birthYearAfter)
+                {
+                    Assert.Fail($"Birth year {a.BirthYear} is NOT after {birthYearAfter}");
+                }
+            }
+
+            IEnumerable<Actor>? orderedActors = null;
+
+
+            switch (orderBy.ToLower())
+            {
+                case "id":
+                    orderedActors = actors.OrderBy(a => a.Id);
+                    break;
+                case "name":
+                    orderedActors = actors.OrderBy(a => a.Name);
+                    break;
+                case "birthyear":
+                    orderedActors = actors.OrderBy(a => a.BirthYear);
+                    break;
+            }
+
+            CollectionAssert.AreEqual(orderedActors.ToList(), actors.ToList(),"Actors NOT ordered correctly");
+        }
+
+
         public void AddGetTest()
         {
             //Arrange
@@ -179,16 +232,21 @@ namespace ActorRepositoryLib.Tests
             };
 
             //Act
-            Actor actorReturned = _repo.Add(actor);
-            Actor actorFound = null;
-            foreach (Actor a in _repo.Get())
-            {
-                if (a.Id == actorReturned.Id)
-                {
-                    actorFound = a;
-                    break;
-                }
-            }
+            Actor? actorReturned = _repo.Add(actor);
+            Actor? actorFound = null;
+            
+            //This:
+            actorFound = _repo.Get().FirstOrDefault(a => a.Id == actorReturned.Id);
+            
+            //Replaces:
+            //foreach (Actor a in _repo.Get())
+            //{
+            //    if (a.Id == actorReturned.Id)
+            //    {
+            //        actorFound = a;
+            //        break;
+            //    }
+            //}
 
             //Assert
             Assert.IsNotNull(actorReturned);
@@ -226,6 +284,51 @@ namespace ActorRepositoryLib.Tests
             Assert.AreEqual(someActor.Id, updatedActor.Id);
             Assert.AreEqual(actorToUpdate.Name, updatedActor.Name);
             Assert.AreEqual(actorToUpdate.BirthYear, updatedActor.BirthYear);
+        }
+
+        /// <summary>
+        /// Tests Actor.Validate() regarding ArgumentOutOfRangeException on invalid values with focus on integration
+        /// </summary>
+        /// <param name="name">Test value</param>
+        /// <param name="birthYear">Test value</param>
+        [TestMethod()]
+        //Invalid out-of-range birth year
+        [DataRow(Actor.ValidName, Actor.MinValidBirthYear - 1)]
+        //Invalid out-of-range names
+        [DataRow(Actor.TooShortName, Actor.ValidBirthYear)]
+        [DataRow(Actor.EmptyName, Actor.ValidBirthYear)]
+
+        public void ValidateTestArgumentOutOfRangeException(string name, int birthYear)
+        {
+            //Arrange 
+            Actor act = new Actor()
+            {
+                Id = Actor.ValidId,
+                BirthYear = birthYear,
+                Name = name
+            };
+
+            //Assert
+            Assert.ThrowsException<ArgumentOutOfRangeException>(() => _repo.Add(act));
+            Assert.ThrowsException<ArgumentOutOfRangeException>(() => _repo.Update(Actor.ValidId, act));
+
+        }
+
+        /// <summary>
+        /// Tests Actor.Validate() regarding ArgumentNullException on null values with focus on integration
+        /// </summary>
+        [TestMethod()]
+        public void ValidateTestArgumentNullException()
+        {
+            Actor act = new Actor()
+            {
+                Id = Actor.ValidId,
+                BirthYear = Actor.ValidBirthYear,
+                Name = Actor.NullName
+            };
+
+            Assert.ThrowsException<ArgumentNullException>(() => _repo.Add(act));
+            Assert.ThrowsException<ArgumentNullException>(() => _repo.Update(Actor.ValidId, act));
         }
     }
 }
